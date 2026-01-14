@@ -1,6 +1,6 @@
 ﻿using TR.Connectors.Api.Interfaces;
 
-namespace TR.Connector.Tests
+namespace TR.Connector.Tests.Integration
 {
     internal class ConsoleLogger : ILogger
     {

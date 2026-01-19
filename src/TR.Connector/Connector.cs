@@ -5,7 +5,7 @@ namespace TR.Connector
 {
     public partial class Connector : IConnector
     {
-        public ILogger Logger { get; set; }
+        public ILogger Logger { get; set; } = new NullLogger();
 
         private string url = "";
         private string login = "";
@@ -18,15 +18,28 @@ namespace TR.Connector
 
         private HttpClient CreateClient(bool withAuth = true)
         {
+            EnsureInitialized();
+
             var httpClient = new HttpClient
             {
                 BaseAddress = new Uri(url)
             };
 
-            if (withAuth && !string.IsNullOrEmpty(token))
+            if (withAuth)
                 httpClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
 
             return httpClient;
+        }
+
+        private void EnsureInitialized()
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                throw new InvalidOperationException(
+                    "Коннектор не инициализирован. Необходимо вызвать метод StartUp перед использованием.");
+
+            if (string.IsNullOrWhiteSpace(token))
+                throw new InvalidOperationException(
+                    "Отсутствует токен аутентификации. Метод StartUp завершился неуспешно.");
         }
     }
 }

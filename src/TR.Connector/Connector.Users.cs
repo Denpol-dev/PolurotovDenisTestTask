@@ -1,6 +1,7 @@
 ﻿using System.Text;
 using System.Text.Json;
 using TR.Connector.ApiDto;
+using TR.Connector.ApiDto.RequestDTO;
 using TR.Connectors.Api.Entities;
 
 namespace TR.Connector
@@ -11,38 +12,59 @@ namespace TR.Connector
         {
             var httpClient = CreateClient();
 
-            var response = httpClient.GetAsync($"api/v1/users/all").Result;
-            var userResponse = JsonSerializer.Deserialize<UserResponse>(response.Content.ReadAsStringAsync().Result);
-            var user = userResponse.data.FirstOrDefault(_ => _.login == userLogin);
+            var response = httpClient.GetAsync("api/v1/users/all").Result;
+            var json = response.Content.ReadAsStringAsync().Result;
 
-            if (user != null) return true;
+            var api = JsonSerializer.Deserialize<ApiResponse<List<UserShortDTO>>>(json)
+                      ?? throw new InvalidOperationException("Пустой ответ от API (users/all).");
 
-            return false;
+            var users = api.EnsureSuccess();
+
+            return users.Any(u => u.Login.Equals(userLogin, StringComparison.OrdinalIgnoreCase));
         }
 
         public void CreateUser(UserToCreate user)
         {
             var httpClient = CreateClient();
 
-            var newUser = new CreateUSerDTO()
+            var dto = new NewUserDTO
             {
-                login = user.Login,
-                password = user.HashPassword,
+                Login = user.Login,
+                Password = user.HashPassword,
 
-                lastName = user.Properties.FirstOrDefault(p => p.Name.Equals("lastName", StringComparison.OrdinalIgnoreCase))?.Value ?? string.Empty,
-                firstName = user.Properties.FirstOrDefault(p => p.Name.Equals("firstName", StringComparison.OrdinalIgnoreCase))?.Value ?? string.Empty,
-                middleName = user.Properties.FirstOrDefault(p => p.Name.Equals("middleName", StringComparison.OrdinalIgnoreCase))?.Value ?? string.Empty,
+                LastName = GetProp(user, "lastName"),
+                FirstName = GetProp(user, "firstName"),
+                MiddleName = GetProp(user, "middleName"),
+                TelephoneNumber = GetProp(user, "telephoneNumber"),
 
-                telephoneNumber = user.Properties.FirstOrDefault(p => p.Name.Equals("telephoneNumber", StringComparison.OrdinalIgnoreCase))?.Value ?? string.Empty,
-                isLead = bool.TryParse(user.Properties.FirstOrDefault(p => p.Name.Equals("isLead", StringComparison.OrdinalIgnoreCase))?.Value ?? string.Empty, out bool isLeadValue)
-                    ? isLeadValue
-                    : false,
+                IsLead = TryGetBoolProp(user, "isLead"),
 
-                status = string.Empty
+                Status = string.Empty
             };
 
-            var content = new StringContent(JsonSerializer.Serialize(newUser), UnicodeEncoding.UTF8, "application/json");
-            httpClient.PostAsync("api/v1/users/create", content).Wait();
+            var content = new StringContent(JsonSerializer.Serialize(dto), UnicodeEncoding.UTF8, "application/json");
+            var response = httpClient.PostAsync("api/v1/users/create", content).Result;
+            var json = response.Content.ReadAsStringAsync().Result;
+
+            var api = JsonSerializer.Deserialize<ApiResponse<object>>(json)
+                      ?? throw new InvalidOperationException("Пустой ответ от API (users/create).");
+
+            if (!api.Success)
+                throw new InvalidOperationException(api.ErrorText ?? "Ошибка API при создании пользователя.");
+        }
+
+        private static string GetProp(UserToCreate user, string name)
+            => user.Properties.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Value
+               ?? string.Empty;
+
+        private static bool? TryGetBoolProp(UserToCreate user, string name)
+        {
+            var raw = user.Properties.FirstOrDefault(p => p.Name.Equals(name, StringComparison.OrdinalIgnoreCase))?.Value;
+
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            return bool.TryParse(raw, out var b) ? b : null;
         }
 
         public void AddUserPermissions(string userLogin, IEnumerable<string> rightIds)
@@ -50,33 +72,30 @@ namespace TR.Connector
             var httpClient = CreateClient();
 
             //проверяем что пользователь не залочен.
-            var response = httpClient.GetAsync($"api/v1/users/all").Result;
-            var userResponse = JsonSerializer.Deserialize<UserResponse>(response.Content.ReadAsStringAsync().Result);
-            var user = userResponse.data.FirstOrDefault(_ => _.login == userLogin);
+            var user = GetUserShort(userLogin);
 
-            if (user != null && user.status == "Lock")
+            if (user.Status.Equals("Lock", StringComparison.OrdinalIgnoreCase))
             {
                 Logger.Error($"Пользователь {userLogin} залочен.");
                 return;
             }
-            //Назначаем права.
-            else if (user != null && user.status == "Unlock")
+
+            foreach (var rightId in rightIds)
             {
-                foreach (var rightId in rightIds)
+                var (kind, id) = ParsePermissionId(rightId);
+
+                var resp = kind switch
                 {
-                    var rightStr = rightId.Split(',');
-                    switch (rightStr[0])
-                    {
-                        case "ItRole":
-                            httpClient.PutAsync($"api/v1/users/{userLogin}/add/role/{rightStr[1]}", null).Wait();
-                            break;
-                        case "RequestRight":
-                            httpClient.PutAsync($"api/v1/users/{userLogin}/add/right/{rightStr[1]}", null).Wait();
-                            break;
-                        default:
-                            throw new Exception($"Тип доступа {rightStr[0]} не определен");
-                    }
-                }
+                    PermissionKind.ItRole => httpClient.PutAsync($"api/v1/users/{userLogin}/add/role/{id}", null).Result,
+                    PermissionKind.RequestRight => httpClient.PutAsync($"api/v1/users/{userLogin}/add/right/{id}", null).Result,
+                    _ => throw new Exception($"Тип доступа {kind} не определен")
+                };
+
+                var json = resp.Content.ReadAsStringAsync().Result;
+                var api = JsonSerializer.Deserialize<ApiResponse<object>>(json);
+
+                if (api is not null && !api.Success)
+                    throw new InvalidOperationException(api.ErrorText ?? "Ошибка API при назначении прав.");
             }
         }
 
@@ -85,34 +104,63 @@ namespace TR.Connector
             var httpClient = CreateClient();
 
             //проверяем что пользователь не залочен.
-            var response = httpClient.GetAsync($"api/v1/users/all").Result;
-            var userResponse = JsonSerializer.Deserialize<UserResponse>(response.Content.ReadAsStringAsync().Result);
-            var user = userResponse.data.FirstOrDefault(_ => _.login == userLogin);
+            var user = GetUserShort(userLogin);
 
-            if (user != null && user.status == "Lock")
+            if (user.Status.Equals("Lock", StringComparison.OrdinalIgnoreCase))
             {
                 Logger.Error($"Пользователь {userLogin} залочен.");
                 return;
             }
-            //отзываем права.
-            else if (user != null && user.status == "Unlock")
+
+            foreach (var rightId in rightIds)
             {
-                foreach (var rightId in rightIds)
+                var (kind, id) = ParsePermissionId(rightId);
+
+                var resp = kind switch
                 {
-                    var rightStr = rightId.Split(',');
-                    switch (rightStr[0])
-                    {
-                        case "ItRole":
-                            httpClient.DeleteAsync($"api/v1/users/{userLogin}/drop/role/{rightStr[1]}").Wait();
-                            break;
-                        case "RequestRight":
-                            httpClient.DeleteAsync($"api/v1/users/{userLogin}/drop/right/{rightStr[1]}").Wait();
-                            break;
-                        default:
-                            throw new Exception($"Тип доступа {rightStr[0]} не определен");
-                    }
-                }
+                    PermissionKind.ItRole => httpClient.DeleteAsync($"api/v1/users/{userLogin}/drop/role/{id}").Result,
+                    PermissionKind.RequestRight => httpClient.DeleteAsync($"api/v1/users/{userLogin}/drop/right/{id}").Result,
+                    _ => throw new Exception($"Тип доступа {kind} не определен")
+                };
+
+                var json = resp.Content.ReadAsStringAsync().Result;
+                var api = JsonSerializer.Deserialize<ApiResponse<object>>(json);
+
+                if (api is not null && !api.Success)
+                    throw new InvalidOperationException(api.ErrorText ?? "Ошибка API при отзыве прав.");
             }
+        }
+
+        private UserShortDTO GetUserShort(string userLogin)
+        {
+            var httpClient = CreateClient();
+
+            var response = httpClient.GetAsync("api/v1/users/all").Result;
+            var json = response.Content.ReadAsStringAsync().Result;
+
+            var api = JsonSerializer.Deserialize<ApiResponse<List<UserShortDTO>>>(json)
+                      ?? throw new InvalidOperationException("Пустой ответ от API (users/all).");
+
+            var users = api.EnsureSuccess();
+
+            return users.FirstOrDefault(u => u.Login.Equals(userLogin, StringComparison.OrdinalIgnoreCase))
+                   ?? throw new InvalidOperationException($"Пользователь {userLogin} не найден.");
+        }
+
+        private enum PermissionKind { ItRole, RequestRight }
+
+        private static (PermissionKind Kind, string Id) ParsePermissionId(string raw)
+        {
+            var parts = raw.Split(',', 2, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length != 2)
+                throw new ArgumentException($"Некорректный идентификатор права: {raw}", nameof(raw));
+
+            return parts[0] switch
+            {
+                "ItRole" => (PermissionKind.ItRole, parts[1]),
+                "RequestRight" => (PermissionKind.RequestRight, parts[1]),
+                _ => throw new ArgumentException($"Тип доступа {parts[0]} не определен", nameof(raw))
+            };
         }
     }
 }

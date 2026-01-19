@@ -2,14 +2,15 @@
 
 public sealed class UserProperty
 {
-    public string Name { get; set; }
-    public string Value { get; set; }
+    public string Name { get; }
+    public string Value { get; }
 
     public UserProperty(string name, string value)
     {
-        if (string.IsNullOrEmpty(name))
-            throw new Exception("name");
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("User property name cannot be empty.", nameof(name));
+
         Name = name;
-        Value = value;
+        Value = value ?? string.Empty;
     }
 }

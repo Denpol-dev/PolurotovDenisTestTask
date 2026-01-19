@@ -108,17 +108,16 @@ namespace TR.Connector.Tests.Integration
 
             Assert.False(_connector.IsUserExists(login));
 
-            var user = new UserToCreate(login, _config.CreateUser.Password)
+            var props = new List<UserProperty>
             {
-                Properties =
-                [
-                    new UserProperty("firstName", "FirstName100"),
-                    new UserProperty("lastName", ""),
-                    new UserProperty("middleName", ""),
-                    new UserProperty("telephoneNumber", ""),
-                    new UserProperty("isLead", ""),
-                ]
+                new("firstName", "FirstName100"),
+                new("lastName", ""),
+                new("middleName", ""),
+                new("telephoneNumber", ""),
+                new("isLead", ""),
             };
+
+            var user = new UserToCreate(login, _config.CreateUser.Password, props);
 
             _connector.CreateUser(user);
 

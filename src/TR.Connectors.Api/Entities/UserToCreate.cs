@@ -2,16 +2,22 @@
 
 public sealed class UserToCreate
 {
-    public string Login { get; set; }
-    public string HashPassword { get; set; }
-    public IEnumerable<UserProperty> Properties { get; set; }
+    public string Login { get; }
+    public string HashPassword { get; }
 
-    public UserToCreate(string login, string hashPassword)
+    public IReadOnlyCollection<UserProperty> Properties { get; }
+
+    public UserToCreate(string login, string hashPassword, IEnumerable<UserProperty>? properties = null)
     {
-        if (string.IsNullOrWhiteSpace(login) || string.IsNullOrWhiteSpace(hashPassword))
-            throw new Exception(string.IsNullOrWhiteSpace(login) ? "login" : "password");
-        HashPassword = hashPassword;
+        if (string.IsNullOrWhiteSpace(login))
+            throw new ArgumentException("User login cannot be empty.", nameof(login));
+
+        if (string.IsNullOrWhiteSpace(hashPassword))
+            throw new ArgumentException("User password hash cannot be empty.", nameof(hashPassword));
+
         Login = login;
-        Properties = Array.Empty<UserProperty>();
+        HashPassword = hashPassword;
+
+        Properties = (properties ?? Array.Empty<UserProperty>()).ToList();
     }
 }

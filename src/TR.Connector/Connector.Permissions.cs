@@ -11,18 +11,24 @@ namespace TR.Connector
             var httpClient = CreateClient();
 
             //Получаем ИТРоли
-            var response = httpClient.GetAsync("api/v1/roles/all").Result;
-            var itRoleResponse = JsonSerializer.Deserialize<RoleResponse>(response.Content.ReadAsStringAsync().Result);
-            var itRolePermissions =
-                itRoleResponse.data.Select(_ => new Permission($"ItRole,{_.id}", _.name, _.corporatePhoneNumber));
+            var rolesJson = httpClient.GetAsync("api/v1/roles/all").Result.Content.ReadAsStringAsync().Result;
+            var rolesApi = JsonSerializer.Deserialize<ApiResponse<List<RoleDTO>>>(rolesJson)
+                          ?? throw new InvalidOperationException("Пустой ответ от API (roles/all).");
+
+            var roles = rolesApi.EnsureSuccess();
+            var itRolePermissions = roles.Select(r =>
+                new Permission($"ItRole,{r.Id}", r.Name, r.CorporatePhoneNumber ?? string.Empty));
 
             //Получаем права
-            response = httpClient.GetAsync("api/v1/rights/all").Result;
-            var RightResponse = JsonSerializer.Deserialize<RoleResponse>(response.Content.ReadAsStringAsync().Result);
-            var RightPermissions = RightResponse.data.Select(_ =>
-                new Permission($"RequestRight,{_.id}", _.name, _.corporatePhoneNumber));
+            var rightsJson = httpClient.GetAsync("api/v1/rights/all").Result.Content.ReadAsStringAsync().Result;
+            var rightsApi = JsonSerializer.Deserialize<ApiResponse<List<RightDTO>>>(rightsJson)
+                           ?? throw new InvalidOperationException("Пустой ответ от API (rights/all).");
 
-            return itRolePermissions.Concat(RightPermissions);
+            var rights = rightsApi.EnsureSuccess();
+            var rightPermissions = rights.Select(r =>
+                new Permission($"RequestRight,{r.Id}", r.Name, string.Empty));
+
+            return itRolePermissions.Concat(rightPermissions);
         }
 
         public IEnumerable<string> GetUserPermissions(string userLogin)
@@ -30,14 +36,20 @@ namespace TR.Connector
             var httpClient = CreateClient();
 
             //Получаем ИТРоли
-            var response = httpClient.GetAsync($"api/v1/users/{userLogin}/roles").Result;
-            var itRoleResponse = JsonSerializer.Deserialize<UserRoleResponse>(response.Content.ReadAsStringAsync().Result);
-            var result1 = itRoleResponse.data.Select(_ => $"ItRole,{_.id}").ToList();
+            var rolesJson = httpClient.GetAsync($"api/v1/users/{userLogin}/roles").Result.Content.ReadAsStringAsync().Result;
+            var rolesApi = JsonSerializer.Deserialize<ApiResponse<List<RoleDTO>>>(rolesJson)
+                          ?? throw new InvalidOperationException("Пустой ответ от API (users/{login}/roles).");
+
+            var roles = rolesApi.EnsureSuccess();
+            var result1 = roles.Select(r => $"ItRole,{r.Id}");
 
             //Получаем права
-            response = httpClient.GetAsync($"api/v1/users/{userLogin}/rights").Result;
-            var RightResponse = JsonSerializer.Deserialize<UserRoleResponse>(response.Content.ReadAsStringAsync().Result);
-            var result2 = RightResponse.data.Select(_ => $"RequestRight,{_.id}").ToList();
+            var rightsJson = httpClient.GetAsync($"api/v1/users/{userLogin}/rights").Result.Content.ReadAsStringAsync().Result;
+            var rightsApi = JsonSerializer.Deserialize<ApiResponse<List<RightDTO>>>(rightsJson)
+                           ?? throw new InvalidOperationException("Пустой ответ от API (users/{login}/rights).");
+
+            var rights = rightsApi.EnsureSuccess();
+            var result2 = rights.Select(r => $"RequestRight,{r.Id}");
 
             return result1.Concat(result2).ToList();
         }
